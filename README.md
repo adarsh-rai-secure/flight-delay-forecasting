@@ -10,7 +10,7 @@ Using historical delay minutes from the Bureau of Transportation Statistics, the
 - Classical time-series models, when applied correctly, can **reliably flag high-risk months in advance**  
 - **Seasonal Auto-ARIMA** consistently produces the most stable and operationally useful forecasts  
 
-The output is not a perfect point forecast, but a **directional risk signal** that supports staffing, scheduling, and contingency planning.
+The output is not a perfect point forecast, but a **directional risk signal** that supports staffing, scheduling, and contingency planning
 
 ---
 

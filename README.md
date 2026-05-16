@@ -1,105 +1,139 @@
-# TimeFlight — Regional Flight Delay Forecasting
+# TimeFlight
 
-## TL;DR
-TimeFlight is a regional flight-delay forecasting system built on 21 years of U.S. aviation data.  
-Using historical delay minutes from the Bureau of Transportation Statistics, the project shows that:
+![Python 3.13](https://img.shields.io/badge/python-3.13-blue.svg)
+![Jupyter Notebook](https://img.shields.io/badge/jupyter-notebook-orange.svg)
+![License](https://img.shields.io/badge/license-MIT-green.svg)
+![statsmodels 0.14](https://img.shields.io/badge/statsmodels-0.14-lightgrey.svg)
+![pmdarima 2.0](https://img.shields.io/badge/pmdarima-2.0-lightgrey.svg)
 
-- Flight delays are **not uniform across the U.S.** and must be modeled region-by-region  
-- **Seasonality is the dominant signal** driving delay risk nationwide  
-- The **South East and West** experience the highest and most volatile delay pressure  
-- Classical time-series models, when applied correctly, can **reliably flag high-risk months in advance**  
-- **Seasonal Auto-ARIMA** consistently produces the most stable and operationally useful forecasts  
+Regional flight delay forecasting framework built on 21 years of Bureau of Transportation Statistics data (407,721 rows, 2004-2024). Maps U.S. airports into five regions and compares five classical time-series models (Seasonal Auto-ARIMA, Auto-ARIMA, ARIMA(1,0,1), Double ETS, Triple ETS) across four historical cutoff windows spanning pre-recession, post-recovery, COVID disruption, and recent high-volatility periods. Seasonal Auto-ARIMA outperforms all baselines with the lowest RMSE in 4 of 5 regions, reliably flagging high-delay periods 6 months in advance. Designed to support crew scheduling, maintenance planning, and traffic management decisions in a $33B annual delay market.
 
-The output is not a perfect point forecast, but a **directional risk signal** that supports staffing, scheduling, and contingency planning
+[Portfolio](https://adarsh-rai.com)
 
----
+![Monthly Flight Delays 2004-2024](docs/images/timeflight-monthly-delays-all-regions.png)
 
-## Problem Context
-Flight delays impose tens of billions of dollars in annual losses across airlines, airports, travelers, and the wider economy.  
-Despite this, many operational decisions are still based on heuristics like “summer is bad” rather than quantified, forward-looking risk.
+Monthly flight delay counts across five U.S. regions from 2004 to 2024. South East (green) consistently produces the highest delays with the most volatility. The COVID collapse near 2020 drops all regions to near zero before a sharp recovery.
 
-This project asks a focused question:  
-*Can we use historical delay behavior alone to generate early, region-specific signals of future delay pressure that are useful for real planning decisions?*
+## The Problem
 
----
-
-## Key Results
-The analysis shows clear and persistent regional structure in delay behavior.
-
-- The **South East and West** consistently exhibit higher average delays and larger volatility  
-- The **North East and South West** are comparatively stable and serve as useful baselines  
-- All regions show strong **annual seasonality**, with predictable summer peaks  
-- Structural shocks, especially COVID-19, materially shift baseline behavior and must be handled explicitly  
-
-Across regions and historical cutoffs, **Seasonal Auto-ARIMA** best balances accuracy, stability, and interpretability, particularly in high-volatility regions.
-
----
+Flight delays cost the U.S. aviation system over $33 billion annually. Most forecasting research in this domain reaches for deep learning approaches that require massive datasets, GPU infrastructure, and produce forecasts that are difficult to explain to the operations teams that need them. TimeFlight tests the opposite position: classical statistical models with rigorous multi-cutoff evaluation can produce operationally useful directional signals from historical delay volumes alone. No weather feeds, no scheduling data, no exogenous variables. The constraint is deliberate. It establishes a lower bound on what univariate forecasting can deliver at the regional level.
 
 ## Dataset
-TimeFlight uses the **Airline On-Time Performance / Cause of Delay** dataset from the  
-U.S. Bureau of Transportation Statistics (BTS).
 
-- Time period: **2004–2024**  
-- Granularity: **Monthly, airport-level observations**  
-- Size: ~400,000 rows across all U.S. airports  
+| Property | Value |
+|---|---|
+| Source | BTS Airline On-Time Performance, Cause of Delay |
+| Rows | 407,721 |
+| Columns | 21 (year, month, carrier, airport, delay causes, flight counts) |
+| Granularity | Monthly, airport-level |
+| Time span | 2004-2024 (21 years) |
+| Target variable | `arr_del15` (flights delayed 15+ minutes per month) |
+| Regional aggregation | 5 regions via manually curated airport-code mapping |
+| Observations per region | ~250 monthly data points |
 
-The raw data is aggregated into **five U.S. regions** (North East, Mid West, South East, South West, West) to improve signal-to-noise and support regional planning.
+![Average Annual Delay Minutes by Region](docs/images/timeflight-rmse-comparison-by-region.png)
 
-**Dataset source:**  
-https://www.transtats.bts.gov/
+Regional delay burden varies sharply. South East averages 275,000 delay minutes per year, driven by hub congestion at ATL, MIA, and CLT combined with thunderstorm season. South West sits at 137,000. This disparity affects model evaluation directly because high-volume, high-variance regions produce larger absolute errors even when the model's relative performance is strong.
 
----
+![Monthly Delay Seasonality by Region](docs/images/monthly%20delays%20across%20regions.png)
 
-## Approach (High Level)
-The project follows a deliberately lightweight and transparent pipeline:
+Strong seasonal patterns are visible across all regions. June through August produces the highest delays, with South East in July being the single worst month-region combination in the dataset. September drops sharply as summer storm patterns subside. December shows a secondary spike from holiday traffic. These seasonal patterns are exactly what the m=12 seasonal component in SARIMA is designed to capture.
 
-1. Ingest and clean monthly delay data from BTS  
-2. Map airports into five geographic regions  
-3. Aggregate airport-level delays into region-level time series  
-4. Perform exploratory analysis to understand trend, volatility, and seasonality  
-5. Forecast each region independently using classical univariate models:
-   - Double ETS  
-   - Triple ETS  
-   - ARIMA(1,0,1)  
-   - Auto-ARIMA (seasonal and non-seasonal)  
-6. Evaluate models across multiple historical cutoffs to test robustness  
+## Models
 
-The focus is on **stable, interpretable signals**, not overfitting.
+| Model | Type | Captures |
+|---|---|---|
+| Double ETS (Additive) | Exponential smoothing | Level + seasonality |
+| Triple ETS (Additive) | Exponential smoothing | Level + trend + explicit seasonal period |
+| ARIMA(1,0,1) | Box-Jenkins | Fixed AR(1) + MA(1), no seasonal component |
+| Auto-ARIMA (Non-Seasonal) | Stepwise search | Automated (p,d,q) order selection |
+| Seasonal Auto-ARIMA | Stepwise SARIMA | Automated (p,d,q)(P,D,Q)[12] with m=12 |
 
----
+ARIMA(1,0,1) is included as a deliberate weak baseline. It has no seasonal component and cannot capture summer peaks or winter spikes. If it outperforms a seasonal model on a given split, the seasonal model's fit has a problem. The model registry is a Python dictionary, so adding a new model is a one-line change. Both statsmodels and pmdarima APIs run through the same evaluation loop with try/except wrapping for convergence failures.
 
-## Repository Contents
-- `TimeFlight Final Code`  
-  End-to-end analysis: data preparation, EDA, modeling, and evaluation.
-- `TimeFlight Final Report`  
-  Detailed write-up of assumptions, model comparisons, and findings.
-- `TimeFlight Presentation`  
-  Executive-level framing focused on operational and policy impact.
+## Evaluation
 
-Each component reinforces a different layer of understanding: code, analysis, and decision context.
+A single train/test split hides model instability, especially with structural breaks in the data. TimeFlight evaluates every model across four cutoff dates, each representing a different operational era:
 
----
+| Cutoff | Era | What it tests |
+|---|---|---|
+| 2009-01-01 | Pre-recession | Older operational patterns, pre-schedule optimization |
+| 2016-01-01 | Post-recovery | Modern operations after capacity adjustments |
+| 2020-01-01 | COVID structural break | Collapse to near-zero traffic and sharp rebound |
+| 2024-07-01 | Recent high-volatility | Smallest training window, most operationally realistic |
 
-## How to Use
-This repository is designed for exploration and review.
+At each cutoff, models train on all data before the date and forecast 12 months ahead. That produces 5 models x 5 regions x 4 cutoffs = 100 model fits, evaluated on MAE, MSE, R², and Mean Error.
 
-1. Start with the presentation to understand the problem and outcomes  
-2. Read the report for deeper reasoning and model comparison  
-3. Review the code to see how the pipeline is implemented end-to-end  
-4. Extend the analysis by adding exogenous variables or airport-level modeling  
+![Multi-Cutoff Forecast Comparison](docs/images/Cutoffsacrossregions.png)
 
----
+The 2020 cutoff is the stress test. Models trained entirely on pre-COVID patterns attempt to forecast a world where air traffic drops to near zero and then rebounds sharply. No univariate model handles this well, which is expected. The evaluation isn't designed to find a model that gets 2020 right. It's designed to find the model that's least wrong across all four windows.
 
-## Why This Matters
-TimeFlight demonstrates that **simple, well-designed models** can deliver meaningful operational value when paired with strong data engineering and evaluation discipline.
+## Results
 
-Rather than chasing complexity, the project shows how classical forecasting methods can still play a central role in real-world decision support systems.
+| Region | Seasonal ARIMA | ARIMA(1,0,1) | Non-Seasonal ARIMA | ETS Models |
+|---|---|---|---|---|
+| Mid West | 4,075 | 7,309 | 6,309 | 10,909 |
+| North East | 4,681 | 6,074 | 5,736 | 5,718 |
+| South East | 7,523 | 6,928 | 7,950 | 10,247 |
+| South West | 3,606 | 4,147 | 4,550 | 4,372 |
+| West | 4,980 | 5,967 | 6,442 | 10,392 |
 
----
+![RMSE Comparison by Region](docs/images/RMSE%20by%20region.png)
 
-## Next Steps
-Planned extensions include:
-- Incorporating weather, traffic volume, and scheduling data  
-- Moving from regional to airport-level forecasting  
-- Supporting additional delay metrics beyond total delay minutes  
-- Packaging forecasts into dashboards or APIs for operational use  
+Seasonal Auto-ARIMA posts the lowest RMSE in 4 of 5 regions. The one exception is South East, where ARIMA(1,0,1) edges it out. South East has the highest absolute delay volume and the widest variance in the dataset, so the seasonal component has more noise to contend with. The fixed-order model predicts a flatter trajectory that happens to land closer to the mean.
+
+ETS models perform worst across the board. Double and Triple ETS post RMSE values nearly double Seasonal ARIMA's in some regions (Mid West: 10,909 vs 4,075). Exponential smoothing without ARIMA's differencing and seasonal integration cannot handle the structural shifts in this dataset. R-squared values are near zero across all models, which is expected with COVID, severe weather events, and airline operational disruptions in the data. The forecasts are directional: they flag high-delay periods 6-12 months out for scheduling and staffing, not precise point predictions.
+
+## Quick Start
+
+```bash
+git clone https://github.com/adarsh-rai-secure/flight-delay-forecasting.git
+cd flight-delay-forecasting
+pip install pandas numpy statsmodels pmdarima scikit-learn matplotlib seaborn
+jupyter notebook "TimeFlight Code.ipynb"
+```
+
+The notebook runs end-to-end in approximately 2 minutes. No API keys, no external services. Data is sourced from BTS.
+
+## Project Structure
+
+```
+flight-delay-forecasting/
+├── TimeFlight Code.ipynb        # Full pipeline: 44 cells, EDA through model comparison
+├── TimeFlight Final Report.pdf  # Methodology, results, discussion
+├── TimeFlight Presentation.pdf  # Executive-level slide deck
+├── README.md
+├── docs/
+│   ├── TimeFlight_Documentation.md
+│   └── images/                  # Charts and visualizations
+└── data/                        # BTS dataset
+```
+
+## Design Decisions
+
+**Classical over deep learning.** With ~250 observations per region, classical models are both appropriate and interpretable. The project establishes a lower bound before reaching for complexity.
+
+**Regional aggregation over airport-level.** Aggregating to five regions smooths airport-specific noise into a signal-to-noise ratio that ARIMA family models can learn from. Airport-level modeling would require a different approach entirely.
+
+**Multi-cutoff over single split.** Four cutoff windows spanning different economic regimes. A single train/test split would hide instability, especially around COVID. 100 model fits across all combinations.
+
+**No exogenous variables.** Deliberate constraint. If a Seasonal ARIMA using only historical delays can flag a high-delay period 6 months out, that's the baseline any more complex approach needs to beat.
+
+**Resilient fitting.** Every model fit is wrapped in try/except so a convergence failure on one model or one region doesn't abort the pipeline. The evaluation loop runs to completion regardless.
+
+## Limitations
+
+- Univariate only. No weather, scheduling, traffic volume, or airline operational data as exogenous inputs.
+- Regional granularity. Airport-level forecasts would require different aggregation and likely different model families.
+- R-squared near zero across all models. Expected with structural breaks but limits point-prediction accuracy.
+- No streaming or real-time pipeline. Batch analysis in a Jupyter notebook.
+- Regional mapping is manually curated, not derived from FAA definitions.
+- COVID structural break in 2020 degrades all models trained across that boundary.
+
+## Team
+
+Class project for Intro to AI at CMU Heinz College (Fall 2025). Three-person team: Adarsh Rai (EDA, regional aggregation, model selection), Ayushi Shah (problem framing, time-series modeling), Taiyuan Zhang (training, testing, visualization).
+
+## License
+
+MIT
